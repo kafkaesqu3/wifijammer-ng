@@ -296,8 +296,9 @@ class wifijammer:
             else:
                 dot11elt = pkt.getlayer(Dot11Elt, ID=61)
 
+
                 ap_channel = ord(dot11elt.info[-int(dot11elt.len):-int(dot11elt.len)+1])
-        except AttributeError:
+        except:
             ap_channel = self.mChannel
 
             # print(ap_channel, self.mChannels, self.mChannel, ap_channel)
