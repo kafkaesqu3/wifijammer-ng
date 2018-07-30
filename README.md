@@ -1,3 +1,7 @@
+This fork of the project adds in the ability to target one or more MAC addresses for deauth. 
+Also adds a dry run mode for testing
+
+
 wifijammer-ng
 ==========
 
